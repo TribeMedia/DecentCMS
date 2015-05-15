@@ -9,7 +9,7 @@ describe('Dust View Engine', function() {
   var template;
   function readFile(path, done) {
     done(null, template);
-  };
+  }
   readFile['@noCallThru'] = true;
   var DustViewEngine = proxyquire('../services/dust-view-engine', {
     fs: {
@@ -20,7 +20,13 @@ describe('Dust View Engine', function() {
     callService: function callService(service, method, context, done) {
       process.nextTick(function() {
         var shape = context.shape;
-        context.renderStream.write('[' + shape.meta.type + ':' + shape.title + ']');
+        context.renderStream.write('['
+        + shape.meta.type
+        + (context.shapeName ? ':' + context.shapeName : '')
+        + ':' + shape.title + ']');
+        if (shape.foo) {
+          context.renderStream.write('foo:' + shape.foo);
+        }
         done();
       });
     },
@@ -94,7 +100,7 @@ describe('Dust View Engine', function() {
   });
 
   it('can render shapes', function(done) {
-    template = 'Here\'s a shape: {@shape shape=theShape tag="div" class="shape-class"/}.';
+    template = 'Here\'s a shape: {@shape shape=theShape name="shape-name" tag="div" class="shape-class" foo="bar" data-baz="base" /}.';
     dustViewEngine.load('path-to-template-with-shape', function(renderTemplate) {
       renderTemplate({
         theShape: {
@@ -103,7 +109,23 @@ describe('Dust View Engine', function() {
         }
       }, renderer, function() {
         expect(html.join(''))
-          .to.equal('Here\'s a shape: <div class="shape-class">[sub-shape:foo]</div>.');
+          .to.equal('Here\'s a shape: <div class="shape-class" data-baz="base">[sub-shape:shape-name:foo]foo:bar</div>.');
+        done();
+      });
+    });
+  });
+
+  it('can render the same shape twice', function(done) {
+    template = 'Here\'s a shape twice: {@shape shape=theShape name="shape-name" tag="div" class="shape-class" foo="bar" /}, {@shape shape=theShape name="shape-name" tag="div" class="shape-class" foo="baz" /}.';
+    dustViewEngine.load('path-to-template-with-shape', function(renderTemplate) {
+      renderTemplate({
+        theShape: {
+          meta: {type: 'sub-shape'},
+          title: 'foo'
+        }
+      }, renderer, function() {
+        expect(html.join(''))
+          .to.equal('Here\'s a shape twice: <div class="shape-class">[sub-shape:shape-name:foo]foo:bar</div>, <div class="shape-class">[sub-shape:shape-name:foo]foo:baz</div>.');
         done();
       });
     });
@@ -122,11 +144,11 @@ describe('Dust View Engine', function() {
       renderTemplate({}, renderer, function() {
         expect(html.join(''))
           .to.equal('Registered styles:\n' +
-          '  <link href="/css/foo.css" rel="stylesheet" type="text/css"/>\r\n' +
-          '  <link href="/css/bar.css" rel="stylesheet" type="text/css"/>\r\n' +
-          '  <link href="http://foo.com/css/style.css" rel="stylesheet" type="text/css"/>\r\n' +
-          '  <link href="https://bar.com/css/style.css" rel="stylesheet" type="text/css"/>\r\n' +
-          '  <link href="//baz.com/css/style.css" rel="stylesheet" type="text/css"/>\r\n' +
+          '<link href="/css/foo.min.css" rel="stylesheet" type="text/css"/>' +
+          '<link href="/css/bar.min.css" rel="stylesheet" type="text/css"/>' +
+          '<link href="http://foo.com/css/style.css" rel="stylesheet" type="text/css"/>' +
+          '<link href="https://bar.com/css/style.css" rel="stylesheet" type="text/css"/>' +
+          '<link href="//baz.com/css/style.css" rel="stylesheet" type="text/css"/>' +
           '.');
         done();
       });
@@ -146,11 +168,11 @@ describe('Dust View Engine', function() {
       renderTemplate({}, renderer, function() {
         expect(html.join(''))
           .to.equal('Registered scripts:\n' +
-          '  <script src="/js/foo.js" type="text/javascript"></script>\r\n' +
-          '  <script src="/js/bar.js" type="text/javascript"></script>\r\n' +
-          '  <script src="http://foo.com/js/script.js" type="text/javascript"></script>\r\n' +
-          '  <script src="https://bar.com/js/script.js" type="text/javascript"></script>\r\n' +
-          '  <script src="//baz.com/js/script.js" type="text/javascript"></script>\r\n' +
+          '<script src="/js/foo.min.js" type="text/javascript"></script>' +
+          '<script src="/js/bar.min.js" type="text/javascript"></script>' +
+          '<script src="http://foo.com/js/script.js" type="text/javascript"></script>' +
+          '<script src="https://bar.com/js/script.js" type="text/javascript"></script>' +
+          '<script src="//baz.com/js/script.js" type="text/javascript"></script>' +
           '.');
         done();
       });
@@ -167,8 +189,8 @@ describe('Dust View Engine', function() {
       renderTemplate({}, renderer, function() {
         expect(html.join(''))
           .to.equal('Registered metas:\n' +
-          '  <meta name="foo" content="Encore plus fou"/>\r\n' +
-          '  <meta custom="yup" other="baz" name="bar" content="Barre"/>\r\n' +
+          '<meta name="foo" content="Encore plus fou"/>' +
+          '<meta custom="yup" other="baz" name="bar" content="Barre"/>' +
           '.');
         done();
       });

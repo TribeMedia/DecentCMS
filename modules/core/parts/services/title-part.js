@@ -15,8 +15,7 @@ var TitlePart = {
    * Adds a title shape to `context.shape.temp.shapes`, and sets the
    * global title for the request if the display type is 'main'.
    * @param {object} context The context object.
-   * @param {object} context.shape
-   * The shape to handle. Its `temp.item` is a reference to the content item.
+   * @param {object} context.shape The shape to handle. Its `temp.item` is a reference to the content item.
    * @param {object} context.scope The scope.
    * @param {Function} done The callback.
    */
@@ -37,11 +36,13 @@ var TitlePart = {
           context.scope.layout.title =
           title;
     }
-    temp.shapes.push({
-      meta: {type: 'title', item: item},
-      temp: {displayType: temp.displayType},
-      text: title
-    });
+    if (temp.shapes) {
+      temp.shapes.push({
+        meta: {type: 'title', item: item},
+        temp: {displayType: temp.displayType},
+        text: title
+      });
+    }
     done();
   }
 };

@@ -4,6 +4,8 @@ Its design principles are inherited from Drupal and Orchard CMS.
 State
 -----
 
+[![Join the chat at https://gitter.im/DecentCMS/DecentCMS](https://badges.gitter.im/Join%20Chat.svg)](https://gitter.im/DecentCMS/DecentCMS?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+
 The current state of DecentCMS is: naked.
 
 The system can handle very simple sites, in a runtime-only fashion.
@@ -34,12 +36,14 @@ The following features are implemented:
 * Localization base infrastructure
 * Tokens
 * Logging (using Winston)
+* JSON API (read-only)
 
 Future features include:
 
 * Document database as the content store
 * Localization implementation
 * Dashboard
+* Workflows
 * Authentication
 * Installer
 
@@ -52,8 +56,8 @@ and contributor feedback.
 
 Near future milestones are:
 
+* Workflows
 * Authentication and basic dashboard infrastructure
-* Documentation up-to-date with code
 * All features manageable through dashboard
 
 Past milestones:
@@ -62,6 +66,8 @@ Past milestones:
   http://decentconsulting.com
 * Documentation and community site running DecentCMS:
   http://decentcms.org
+* Documentation up-to-date with code. There is still much work to do,
+  but there is basic documentation for everything.
 
 Installation
 ------------

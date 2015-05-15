@@ -120,8 +120,9 @@ describe('File Index', function() {
         return function(iterator) {
           var id = 'item' + i;
           while(context.idFilter
-          && !context.idFilter.test(id)
-          && i <= nbItems) {
+            && context.idFilter.test
+            && !context.idFilter.test(id)
+            && i <= nbItems) {
             i++;
             id = 'item' + i;
           }
@@ -162,22 +163,29 @@ describe('File Index', function() {
     });
   });
 
-  it("yields the same index for the same map and order", function() {
-    var indexA = indexFactory.getIndex(mapNull, orderBy);
-    var indexB = indexFactory.getIndex(mapNull, orderBy);
+  it("yields the same index for the same id filter, map, and order", function() {
+    var indexA = indexFactory.getIndex('foo', mapNull, orderBy);
+    var indexB = indexFactory.getIndex('foo', mapNull, orderBy);
+
+    expect(indexA).to.equal(indexB);
+  });
+
+  it("yields the same index for the same name, but different map and order", function() {
+    var indexA = indexFactory.getIndex('foo', mapNull, orderBy, 'index-name');
+    var indexB = indexFactory.getIndex('bar', function() {}, function() {}, 'index-name');
 
     expect(indexA).to.equal(indexB);
   });
 
   it("loads the index from disk if the file exists", function() {
     indexExists = true;
-    var index = indexFactory.getIndex(mapNull, orderBy);
+    var index = indexFactory.getIndex(null, mapNull, orderBy);
 
     expect(index._index.val).to.equal('null index cache');
   });
 
   it("builds the index from content items in the right order", function(done) {
-    var index = indexFactory.getIndex(mapSingleEntry, orderBy);
+    var index = indexFactory.getIndex(null, mapSingleEntry, orderBy);
 
     process.nextTick(function() {
       clearIndexOrderCache(index._index);
@@ -242,8 +250,10 @@ describe('File Index', function() {
 
     process.nextTick(function() {
       clearIndexOrderCache(index._index);
-      index.filter(function(entry) {
-        return entry.indexedFoo.substr(0, 3) === 'bar';
+      index.filter({
+        where: function (entry) {
+          return entry.indexedFoo.substr(0, 3) === 'bar';
+        }
       }, function(entries) {
         expect(entries).to.deep.equal([
           {indexedFoo: 'baritem2', itemId: 'item2', index: 2},
@@ -260,9 +270,12 @@ describe('File Index', function() {
 
     process.nextTick(function() {
       clearIndexOrderCache(index._index);
-      index.filter(function(entry) {
-        return entry.indexedFoo.substr(0, 3) === 'bar';
-      }, 1, function(entries) {
+      index.filter({
+        where: function (entry) {
+          return entry.indexedFoo.substr(0, 3) === 'bar';
+        },
+        start: 1
+      }, function(entries) {
         expect(entries).to.deep.equal([
           {indexedFoo: 'baritem3', itemId: 'item3', index: 3},
           {indexedFoo: 'baritem1', itemId: 'item1', index: 1}
@@ -277,9 +290,12 @@ describe('File Index', function() {
 
     process.nextTick(function() {
       clearIndexOrderCache(index._index);
-      index.filter(function(entry) {
-        return entry.index < 3;
-      }, 1, 2, function(entries) {
+      index.filter({
+        where: function (entry) {
+          return entry.index < 3;
+        }
+        , start: 1, count: 2
+      }, function(entries) {
         expect(entries).to.deep.equal([
           {indexedFoo: 'baritem2', itemId: 'item2', index: 2},
           {indexedFoo: 'fooitem1', itemId: 'item1', index: 1}
@@ -293,12 +309,17 @@ describe('File Index', function() {
     var index = indexFactory.getIndex(mapMultipleEntries, orderBy);
 
     process.nextTick(function() {
-      index.reduce(function(val, entry) {
-        return val + entry.index;
-      }, 0, function(aggregated) {
-        expect(aggregated).to.equal(12);
-        done();
-      });
+      index.reduce({
+        reduce: function (val, entry) {
+          return val + entry.index;
+        },
+        initialValue: 0
+        },
+        function (aggregated) {
+          expect(aggregated).to.equal(12);
+          done();
+        }
+      );
     });
   });
 
@@ -306,13 +327,15 @@ describe('File Index', function() {
     var index = indexFactory.getIndex(mapMultipleEntries, orderBy);
 
     process.nextTick(function() {
-      index.reduce(
-        function(entry) {
-          return entry.itemId === 'item3';
+      index.reduce({
+          where: function (entry) {
+            return entry.itemId === 'item3';
+          },
+          reduce: function (val, entry) {
+            return val + entry.index;
+          },
+          initialValue: 0
         },
-        function(val, entry) {
-          return val + entry.index;
-        }, 0,
         function(aggregated) {
           expect(aggregated).to.equal(6);
           done();

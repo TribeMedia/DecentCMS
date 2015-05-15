@@ -57,6 +57,7 @@ var StaticRouteHandler = {
       });
       var featureSettings = scope.settings[StaticRouteHandler.feature];
       var staticFolders = featureSettings.staticFolders;
+      var maxAge = featureSettings.maxAge || 24*60*60*1000; // 1 day by default
       var log = scope.require('log');
       // Register a static route for each existing static folder in each module
       for (var i = 0; i < modulePaths.length; i++) {
@@ -64,20 +65,23 @@ var StaticRouteHandler = {
           var physicalPath = path.join(modulePaths[i], staticFolders[j]);
           if (!fs.existsSync(physicalPath)) continue;
           var url = '/' + staticFolders[j];
-          app.use(url, express.static(physicalPath));
-          log.verbose('Added static file route.', {path: physicalPath});
+          app.use(url, express.static(physicalPath, {maxAge: maxAge}));
+          log.verbose('Added static file route.', {url: url, path: physicalPath});
         }
       }
       // Register a static route for the site's media folder
       var mediaFolder = featureSettings.mediaFolder;
       if (mediaFolder) {
         var mediaPath = path.join(scope.rootPath, mediaFolder);
-        app.use('/media', express.static(mediaPath));
+        app.use('/media', express.static(mediaPath, {maxAge: maxAge}));
         log.verbose('Added media static file route.', {path: mediaPath});
       }
       // Also, register a /favicon.ico route in case the theme doesn't do things correctly
-      var faviconPath = path.resolve('./favicon.ico');
-      app.use('/favicon.ico', express.static(faviconPath));
+      var faviconPath = path.resolve(scope.rootPath, 'favicon.ico');
+      if (!fs.existsSync(faviconPath)) {
+        faviconPath = path.resolve('./favicon.ico');
+      }
+      app.use('/favicon.ico', express.static(faviconPath, {maxAge: maxAge}));
       log.verbose('Added static favicon.ico route.', {path: faviconPath});
     });
   }

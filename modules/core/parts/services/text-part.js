@@ -14,8 +14,7 @@ var TextPart = {
    * Adds a text shape to `context.shape.temp.shapes` for each text
    * part on the content item.
    * @param {object} context The context object.
-   * @param {object} context.shape
-   * The shape to handle. Its `temp.item` is a reference to the content item.
+   * @param {object} context.shape The shape to handle. Its `temp.item` is a reference to the content item.
    * @param {object} context.scope The scope.
    * @param {Function} done The callback.
    */
@@ -38,17 +37,19 @@ var TextPart = {
         : part.text;
       var flavor = part.flavor
         || (part.src ? path.extname(part.src).substr(1) : 'plain-text');
-      temp.shapes.push({
-        meta: {
-          type: 'text',
-          name: partName,
-          alternates: ['text-' + partName],
-          item: item
-        },
-        temp: {displayType: temp.displayType},
-        text: text,
-        flavor: flavor
-      });
+      if (temp.shapes) {
+        temp.shapes.push({
+          meta: {
+            type: 'text',
+            name: partName,
+            alternates: ['text-' + partName],
+            item: item
+          },
+          temp: {displayType: temp.displayType},
+          text: text,
+          flavor: flavor
+        });
+      }
     }
     done();
   }

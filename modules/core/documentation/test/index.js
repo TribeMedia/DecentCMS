@@ -123,16 +123,18 @@ var itemsToIndex = [
   {id: 'docs:module2', title: 'Module 2 index', temp: {name: 'index'}}
 ];
 
+var shell = {
+  moduleManifests: {
+    module1: {physicalPath: path.resolve('modules', 'module1')},
+    module2: {physicalPath: path.resolve('modules', 'module2')}
+  }
+};
+
 var scope = {
   require: function(service) {
     switch(service) {
       case 'shell':
-        return {
-          moduleManifests: {
-            module1: {physicalPath: path.resolve('modules', 'module1')},
-            module2: {physicalPath: path.resolve('modules', 'module2')}
-          }
-        };
+        return shell;
       case 'log':
         return {
           info: function() {}
@@ -168,7 +170,9 @@ var scope = {
               return a.length - b.length;
             });
             return {
-              reduce: function(fun, seed, done) {
+              reduce: function(context, done) {
+                var seed = context.initialValue;
+                var fun = context.reduce;
                 index.forEach(function(entry) {
                   seed = fun(seed, entry);
                 });
@@ -330,8 +334,6 @@ describe('Documentation Route Handler', function() {
     };
     middleware(app);
 
-    expect(route).to.equal('/docs(/*)?');
-
     handler({
       require: function() {
         return contentRenderer;
@@ -351,6 +353,17 @@ describe('Documentation Route Handler', function() {
     expect(DocumentationRouteHandler.getUrl('foo/bar/baz'))
       .to.not.be.ok;
     expect(DocumentationRouteHandler.getUrl('foo:bar/baz'))
+      .to.not.be.ok;
+  });
+
+  it("can build a topic's id from its URL", function() {
+    expect(DocumentationRouteHandler.getId('/docs/foo/bar'))
+      .to.equal('docs:foo/bar');
+    expect(DocumentationRouteHandler.getId('/docs/api/foo/bar'))
+      .to.not.be.ok;
+    expect(DocumentationRouteHandler.getId('/foo/bar'))
+      .to.not.be.ok;
+    expect(DocumentationRouteHandler.getId('/'))
       .to.not.be.ok;
   });
 });
@@ -412,8 +425,6 @@ describe('API Documentation Route Handler', function() {
     };
     middleware(app);
 
-    expect(route).to.equal('/docs/api(/*)?');
-
     handler({
       require: function() {
         return contentRenderer;
@@ -433,6 +444,17 @@ describe('API Documentation Route Handler', function() {
     expect(ApiDocumentationRouteHandler.getUrl('foo/bar/baz'))
       .to.not.be.ok;
     expect(ApiDocumentationRouteHandler.getUrl('foo:bar/baz'))
+      .to.not.be.ok;
+  });
+
+  it("can build a topic's id from its URL", function() {
+    expect(ApiDocumentationRouteHandler.getId('/docs/api/foo/bar'))
+      .to.equal('apidocs:foo/bar');
+    expect(ApiDocumentationRouteHandler.getId('/docs/foo/bar'))
+      .to.not.be.ok;
+    expect(ApiDocumentationRouteHandler.getId('/foo/bar'))
+      .to.not.be.ok;
+    expect(ApiDocumentationRouteHandler.getId('/'))
       .to.not.be.ok;
   });
 });
@@ -456,7 +478,7 @@ describe('JsDoc File Parser', function() {
   });
 
   it('parses JavaScript files for JsDoc', function(done) {
-    this.timeout(4000);
+    this.timeout(10000);
     var context = {
       path: 'path/to/some-file-to-test.js',
       data: js,
@@ -497,6 +519,51 @@ describe('JsDoc File Parser', function() {
     var context = {
       path: 'path/to/some-file-to-test.unknown',
       data: 'foo'
+    };
+    parser.parse(context, function() {
+      expect(context.item).to.not.be.ok;
+      done();
+    });
+  });
+
+  it("won't parse if the only from cache setting is true", function(done) {
+    var context = {
+      path: 'path/to/some-file-to-test.js',
+      data: js,
+      scope: {
+        require: function() {
+          return {
+            settings: {
+              'api-documentation': {
+                onlyFromCache: true
+              }
+            }
+          }
+        }
+      }
+    };
+    parser.parse(context, function() {
+      expect(context.item).to.not.be.ok;
+      done();
+    });
+  });
+
+  it("won't parse if the only from cache setting is release and the shell is in debug mode", function(done) {
+    var context = {
+      path: 'path/to/some-file-to-test.js',
+      data: js,
+      scope: {
+        require: function() {
+          return {
+            settings: {
+              'api-documentation': {
+                onlyFromCache: 'release'
+              }
+            },
+            debug: true
+          }
+        }
+      }
     };
     parser.parse(context, function() {
       expect(context.item).to.not.be.ok;
@@ -650,32 +717,32 @@ describe('Documentation TOC part', function() {
       shape: tocItem
     }, function() {
       expect(tocItem.toc.topLevelTOC).to.deep.equal([
-        {itemId: 'docs:', module: null, section: null, name: 'index', number: '0', title: 'Root', url: 'url:docs:'},
-        {itemId: 'docs:top1', module: null, section: null, name: 'top1', number: '9000', title: 'Top 1', url: 'url:docs:top1'},
-        {itemId: 'docs:top2', module: null, section: null, name: 'top2', number: '9000', title: 'Top 2', url: 'url:docs:top2'},
-        {itemId: 'docs:section1', isSectionIndex: true, module: null, section: 'section1', name: 'index', number: '0', title: 'Section 1 index', url: 'url:docs:section1'},
-        {itemId: 'docs:section2', isSectionIndex: true, module: null, section: 'section2', name: 'index', number: '0', title: 'Section 2 index', url: 'url:docs:section2'},
-        {itemId: 'docs:module1', isModuleIndex: true, module: 'module1', section: null, name: 'index', number: '0', title: 'Module 1 index', url: 'url:docs:module1'},
-        {itemId: 'docs:module2', isModuleIndex: true, module: 'module2', section: null, name: 'index', number: '0', title: 'Module 2 index', url: 'url:docs:module2'}
+        {itemId: 'docs:', area: null, module: null, section: null, name: 'index', number: '0', title: 'Root', url: 'url:docs:'},
+        {itemId: 'docs:top1', area: null, module: null, section: null, name: 'top1', number: '9000', title: 'Top 1', url: 'url:docs:top1'},
+        {itemId: 'docs:top2', area: null, module: null, section: null, name: 'top2', number: '9000', title: 'Top 2', url: 'url:docs:top2'},
+        {itemId: 'docs:section1', area: null, isSectionIndex: true, module: null, section: 'section1', name: 'index', number: '0', title: 'Section 1 index', url: 'url:docs:section1'},
+        {itemId: 'docs:section2', area: null, isSectionIndex: true, module: null, section: 'section2', name: 'index', number: '0', title: 'Section 2 index', url: 'url:docs:section2'},
+        {itemId: 'docs:module1', area: null, isModuleIndex: true, module: 'module1', section: null, name: 'index', number: '0', title: 'Module 1 index', url: 'url:docs:module1'},
+        {itemId: 'docs:module2', area: null, isModuleIndex: true, module: 'module2', section: null, name: 'index', number: '0', title: 'Module 2 index', url: 'url:docs:module2'}
       ]);
       expect(tocItem.toc.localTOC).to.deep.equal([
-        {itemId: 'docs:module1/topic1', module: 'module1', section: null, name: 'topic1', number: '9000', title: 'Module 1 topic 1', url: 'url:docs:module1/topic1'},
-        {itemId: 'docs:module1/topic2', module: 'module1', section: null, name: 'topic2', number: '9000', title: 'Module 1 topic 2', url: 'url:docs:module1/topic2'},
-        {itemId: 'docs:module1/section1', isSectionIndex: true, module: 'module1', section: 'section1', name: 'index', number: '0', title: 'Module 1 section 1 index', url: 'url:docs:module1/section1'},
-        {itemId: 'apidocs:module1/service1', module: 'module1', section: null, name: 'service1', number: '9000', title: 'Module 1 service 1', url: 'url:apidocs:module1/service1'}
+        {itemId: 'docs:module1/topic1', area: null, module: 'module1', section: null, name: 'topic1', number: '9000', title: 'Module 1 topic 1', url: 'url:docs:module1/topic1'},
+        {itemId: 'docs:module1/topic2', area: null, module: 'module1', section: null, name: 'topic2', number: '9000', title: 'Module 1 topic 2', url: 'url:docs:module1/topic2'},
+        {itemId: 'docs:module1/section1', isSectionIndex: true, area: null, module: 'module1', section: 'section1', name: 'index', number: '0', title: 'Module 1 section 1 index', url: 'url:docs:module1/section1'},
+        {itemId: 'apidocs:module1/service1', area: null, module: 'module1', section: null, name: 'service1', number: '9000', title: 'Module 1 service 1', url: 'url:apidocs:module1/service1'}
       ]);
       expect(tocItem.toc.breadcrumbs).to.deep.equal([
-        {itemId: 'docs:module1', isModuleIndex: true, module: 'module1', section: null, name: 'index', number: '0', title: 'Module 1 index', url: 'url:docs:module1'},
-        {itemId: 'apidocs:module1/service1', module: 'module1', section: null, name: 'service1', number: '9000', title: 'Module 1 service 1', url: 'url:apidocs:module1/service1'}
+        {itemId: 'docs:module1', isModuleIndex: true, area: null, module: 'module1', section: null, name: 'index', number: '0', title: 'Module 1 index', url: 'url:docs:module1'},
+        {itemId: 'apidocs:module1/service1', area: null, module: 'module1', section: null, name: 'service1', number: '9000', title: 'Module 1 service 1', url: 'url:apidocs:module1/service1'}
       ]);
       expect(tocItem.toc.previous).to.deep.equal(
-        {itemId: 'docs:module1/section1/topic2', module: 'module1', section: 'section1', name: 'topic2', number: '9000', title: 'Module 1 section 1 topic 2', url: 'url:docs:module1/section1/topic2'}
+        {itemId: 'docs:module1/section1/topic2', area: null, module: 'module1', section: 'section1', name: 'topic2', number: '9000', title: 'Module 1 section 1 topic 2', url: 'url:docs:module1/section1/topic2'}
       );
       expect(tocItem.toc.current).to.deep.equal(
-        {itemId: 'apidocs:module1/service1', module: 'module1', section: null, name: 'service1', number: '9000', title: 'Module 1 service 1', url: 'url:apidocs:module1/service1'}
+        {itemId: 'apidocs:module1/service1', area: null, module: 'module1', section: null, name: 'service1', number: '9000', title: 'Module 1 service 1', url: 'url:apidocs:module1/service1'}
       );
       expect(tocItem.toc.next).to.deep.equal(
-        {itemId: 'docs:module2', isModuleIndex: true, module: 'module2', section: null, name: 'index', number: '0', title: 'Module 2 index', url: 'url:docs:module2'}
+        {itemId: 'docs:module2', area: null, isModuleIndex: true, module: 'module2', section: null, name: 'index', number: '0', title: 'Module 2 index', url: 'url:docs:module2'}
       );
       done();
     });

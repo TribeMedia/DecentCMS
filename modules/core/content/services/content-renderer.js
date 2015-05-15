@@ -70,12 +70,17 @@ ContentRenderer.prototype.promiseToRender = function promiseToRender(options) {
  */
 ContentRenderer.prototype.render = function render(context, pageBuilt) {
   var scope = this.scope;
+  if (scope.handled) {
+    pageBuilt();
+    return;
+  }
   var log = scope.require('log');
   var response = context.response;
   var shapes = scope.shapes;
   var layout = scope.layout = {
     meta: {type: 'layout'},
-    site: scope.require('shell')
+    site: scope.require('shell'),
+    temp: {}
   };
   var renderStream = scope.require('render-stream');
   // TODO: add filters, that are just additional pipes before res.
@@ -83,9 +88,18 @@ ContentRenderer.prototype.render = function render(context, pageBuilt) {
     .on('data', function(data) {
       response.write(data);
     });
+  if (renderStream.onError) {
+    renderStream.onError(function (err) {
+      pageBuilt(err);
+      return;
+    });
+  }
   if (scope.itemId) {
     var item = scope.require('storage-manager').getAvailableItem(scope.itemId);
-    if (!item) {
+    if (item) {
+      layout.temp.item = item;
+    }
+    else {
       response.statusCode = 404;
       renderStream.title = scope.title = layout.title =
         scope.require('localization')('404 - Not Found');

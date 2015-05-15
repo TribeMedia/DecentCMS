@@ -19,9 +19,10 @@ var async = require('async');
  *   The sort order can be a simple string, date, number, or it can be an array,
  *   in which case the items in the array will be used one after the other.
  *   It takes an index entry, and returns the sort order.
+ * @param {string} [name] A name for the index. If not provided, one will be built from the other parameters.
  * @constructor
  */
-function FileIndex(scope, idFilter, map, orderBy) {
+function FileIndex(scope, idFilter, map, orderBy, name) {
   if (typeof(idFilter) === 'function') {
     orderBy = map;
     map = idFilter;
@@ -31,7 +32,7 @@ function FileIndex(scope, idFilter, map, orderBy) {
   this.idFilter = idFilter;
   this.map = map;
   this.orderBy = orderBy;
-  this.name = FileIndex._toName(map, orderBy);
+  this.name = name || FileIndex._toName(map, orderBy);
   this._unsortedIndex = null;
   this._index = null;
 
@@ -71,32 +72,28 @@ FileIndex._toName = FileIndex.prototype._toName = function toName() {
 
 /**
  * Filters the index with a where clause.
- * @param {Function} where The where function. It takes an index entry,
+ * @param {object} options The options object.
+ * @param {Function} options.where The where function. It takes an index entry,
  *   and returns true if the entry should be included.
- * @param {Number} [start] The index of the first entry to be returned
+ * @param {Number} [options.start] The index of the first entry to be returned
  *   that evaluates true from the where clause.
- * @param {Number} [count] The number of entries to return.
+ * @param {Number} [options.count] The number of entries to return.
  *   Omit if an unlimited number of items can be returned.
  * @param {Function} done The callback, that takes the array of index
  * entries satisfying the where clause and within the range as its
  * parameter.
  */
-FileIndex.prototype.filter = function filter(where, start, count, done) {
-  if (arguments.length == 2) {
-    done = start;
-    start = 0;
-    count = null;
-  }
-  else if (arguments.length == 3) {
-    done = count;
-    count = null;
-  }
-  start = start || 0;
+FileIndex.prototype.filter = function filter(options, done) {
+  var start = options.start || 0;
   var index = this._index || [];
+  if (!options.where) {
+    done(index.slice(start, start + options.count));
+    return;
+  }
   var results = [];
-  for (var i = 0, j = 0; i < index.length && (!count || j < start + count); i++) {
+  for (var i = 0, j = 0; i < index.length && (!options.count || j < start + options.count); i++) {
     var entry = index[i];
-    if (where(entry)) {
+    if (options.where(entry)) {
       if (j >= start) {
         results.push(entry);
       }
@@ -108,29 +105,24 @@ FileIndex.prototype.filter = function filter(where, start, count, done) {
 
 /**
  * Reduces the index to an aggregated object.
- * @param {Function} [where] A condition on the index entries.
- * @param {Function} reduce The reduce function. It takes the previous
- *   value, the entry to process, and the index of the entry.
- *   It returns the new value.
- * @param {*} initialValue The initial value or seed of the aggregation.
+ * @param {object} options The options object.
+ * @param {Function} [options.where] A condition on the index entries.
+ * @param {Function} options.reduce The reduce function. It takes the previous value, the entry to process, and the index of the entry. It returns the new value.
+ * @param {*} options.initialValue The initial value or seed of the aggregation.
  * @param {Function} done The callback, that takes the aggregated value
  * of index entries satisfying the where clause.
  */
-FileIndex.prototype.reduce = function reduce(where, reduce, initialValue, done) {
+FileIndex.prototype.reduce = function reduce(options, done) {
   var index = this._index || [];
-  if (arguments.length === 3) {
-    done = initialValue;
-    initialValue = reduce;
-    reduce = where;
-    where = null;
-    done(index.reduce(reduce, initialValue));
+  var val = options.initialValue;
+  if (!options.where) {
+    done(index.reduce(options.reduce, val));
     return;
   }
-  var val = initialValue;
   for (var i = 0; i < index.length; i++) {
     var entry = index[i];
-    if (where(entry)) {
-      val = reduce(val, entry, i);
+    if (!options.where || options.where(entry)) {
+      val = options.reduce(val, entry, i);
     }
   }
   done(val);
@@ -156,8 +148,10 @@ FileIndex.prototype._compare = function compare(a, b) {
  *   will be added.
  * @param {Array|object|null} indexEntries The result of a map call.
  * @param {string} id The id of the item that was mapped.
+ * @param {Boolean} [sorted] Is the index sorted already?
  */
 FileIndex.prototype._addToIndex = function addToIndex(index, indexEntries, id, sorted) {
+  // TODO; can we apply a faster algorithm to find where to insert the entries?
   var self = this;
   if (indexEntries) {
     if (!Array.isArray(indexEntries)) {
@@ -203,7 +197,7 @@ FileIndex.prototype.build = function build() {
     var iterate = store.getItemEnumerator(context);
     var iterator = function forEachItem(err, item) {
       if (err) {
-        log.error('Item enumeration failed.', {item: item ? item.id : 'unknown', iterating: iterate.name})
+        log.error('Item enumeration failed.', {item: item ? item.id : 'unknown', iterating: iterate.name});
         next(err);
         return;
       }
@@ -347,11 +341,12 @@ FileIndexFactory.scope = 'shell';
  *   in which case the items in the array will be used one after the other.
  *   It is recommended to name the order function.
  * @returns {object} The index object.
+ * @param {string} [name] A unique name for the index. If it's not provided, one will be generated from the source code of the filter, map, and orderBy parameters.
  */
-FileIndexFactory.prototype.getIndex = function getIndex(idFilter, map, orderBy) {
-  var name = FileIndex._toName(idFilter, map, orderBy);
+FileIndexFactory.prototype.getIndex = function getIndex(idFilter, map, orderBy, name) {
+  name = name || FileIndex._toName(idFilter, map, orderBy);
   if (this.indexes[name]) return this.indexes[name];
-  var index = this.indexes[name] = new FileIndex(this.scope, idFilter, map, orderBy);
+  var index = this.indexes[name] = new FileIndex(this.scope, idFilter, map, orderBy, name);
   if (!index._index && !index._unsortedIndex) {
     process.nextTick(index.build.bind(index));
   }

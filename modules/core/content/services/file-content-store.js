@@ -14,16 +14,19 @@ var fileContentStore = {
    * and puts the results on context.items.
    * @param {object} context The context object.
    * @param {object} context.scope The scope.
-   * @param {object} context.itemsToFetch The ids of the items to fetch are the
-   *   property names on this object, and the values are arrays of callback
-   *   functions to be called once the item has been loaded. Those callback
-   *   functions should take an error and the item as their parameters.
-   * @param {object} context.items The fetched items. Property names are ids,
-   *   and values are the items themselves.
-   * @param {Function} nextStore The callback that will call into the next store.
-   *   It should take an error as its parameter.
+   * @param {object} [context.request] The request.
+   * @param {object} context.itemsToFetch The ids of the items to fetch are the property names on this object, and the values are arrays of callback functions to be called once the item has been loaded. Those callback functions should take an error and the item as their parameters.
+   * @param {object} context.items The fetched items. Property names are ids, and values are the items themselves.
+   * @param {Function} nextStore The callback that will call into the next store. It should take an error as its parameter.
    */
   loadItems: function loadItems(context, nextStore) {
+    var itemsToFetch = context.itemsToFetch;
+    var paths = Object.getOwnPropertyNames(itemsToFetch);
+    if (paths.length === 0) {
+      nextStore();
+      return;
+    }
+
     var path = require('path');
     var fs = require('fs');
     var async = require('async');
@@ -34,7 +37,6 @@ var fileContentStore = {
     var log = scope.require('log');
 
     var items = context.items = context.items || {};
-    var itemsToFetch = context.itemsToFetch;
 
     var handle = function handleItemData(id, filePath, item, callback) {
       if (!item) {
@@ -78,6 +80,7 @@ var fileContentStore = {
           }
           // Add the file path and name to temp meta data
           var temp = shapeHelper.temp(item);
+          temp.storage = 'FileSystem';
           temp.filePath = filePath;
           var baseName = path.basename(filePath);
           var extensionIndex = baseName.indexOf('.');
@@ -98,7 +101,6 @@ var fileContentStore = {
         });
     };
 
-    var paths = Object.keys(itemsToFetch);
     async.each(
       paths,
       function(id, next) {

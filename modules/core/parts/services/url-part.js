@@ -11,8 +11,7 @@ var UrlPart = {
   /**
    * Adds a url shape to `context.shape.temp.shapes` for each part of type 'url'.
    * @param {object} context The context object.
-   * @param {object} context.shape
-   * The shape to handle. Its `temp.item` is a reference to the content item.
+   * @param {object} context.shape The shape to handle. It has a `url` and an optional `text` property.
    * @param {object} context.scope The scope.
    * @param {Function} done The callback.
    */
@@ -34,17 +33,19 @@ var UrlPart = {
         ? part
         : part.url;
       var text = part.text || url;
-      temp.shapes.push({
-        meta: {
-          type: 'url',
-          name: partName,
-          alternates: ['url-' + partName],
-          item: item
-        },
-        temp: {displayType: temp.displayType},
-        text: text,
-        url: url
-      });
+      if (temp.shapes) {
+        temp.shapes.push({
+          meta: {
+            type: 'url',
+            name: partName,
+            alternates: ['url-' + partName],
+            item: item
+          },
+          temp: {displayType: temp.displayType},
+          text: text,
+          url: url
+        });
+      }
     }
     done();
   }

@@ -74,6 +74,7 @@ var CodeViewEngine = function CodeViewEngine(scope) {
 
   var RenderStream = require('./render-stream');
   var dust = require('dustjs-linkedin');
+  dust.config.whitespace = !!scope.debug;
   dust.helper = require('dustjs-helpers');
 
   function getDustTemplate(templatePath) {
@@ -89,10 +90,48 @@ var CodeViewEngine = function CodeViewEngine(scope) {
   }
 
   dust.helpers.shape = function shapeDustHelper(chunk, context, bodies, params) {
-    var shape = dust.helpers.tap(params.shape, chunk, context);
-    if (!shape) return chunk.map(function renderEmpty(chunk) {chunk.end();});
-    var tag = dust.helpers.tap(params.tag, chunk, context);
-    var cssClass = dust.helpers.tap(params.class, chunk, context);
+    var theShape = dust.helpers.tap(params.shape, chunk, context);
+    if (!theShape) {
+      return chunk.map(function renderEmpty(chunk) {chunk.end();});
+    }
+    // Clone the shape, so that its attributes can be changed between different
+    // renderings of the same shape.
+    // Warning: shallow copy, so weird things may still happen for object and
+    // array properties.
+    var shape = {meta: theShape.meta, temp: theShape.temp};
+    Object.getOwnPropertyNames(theShape)
+      .forEach(function(propertyName) {
+        if (propertyName === 'meta' || propertyName == 'temp') return;
+        shape[propertyName] = theShape[propertyName];
+      });
+    var name, tag;
+    var attributes = {};
+    Object.getOwnPropertyNames(params)
+      .forEach(function(paramName) {
+        var param = dust.helpers.tap(params[paramName], chunk, context);
+        switch(paramName) {
+          case 'shape': break;
+          case 'name':
+            name = param;
+            break;
+          case 'tag':
+            tag = param;
+            break;
+          case 'class':
+            attributes['class'] = param;
+            break;
+          case 'style':
+            attributes.style = param;
+            break;
+          default:
+            if (paramName.substr(0, 5) === 'data-') {
+              attributes[paramName] = param;
+            }
+            else {
+              shape[paramName] = param;
+            }
+        }
+      });
     var renderer = chunk.root['decent-renderer'];
     return chunk.map(function renderShapeFromDust(chunk) {
       var innerRenderer = new RenderStream(renderer.scope, {
@@ -110,7 +149,7 @@ var CodeViewEngine = function CodeViewEngine(scope) {
           chunk.end();
         });
       innerRenderer
-        .shape(shape, tag, cssClass ? {class: cssClass} : null)
+        .shape({shape: shape, tag: tag, attributes: attributes, shapeName: name})
         .finally(function() {
           chunk.end();
         });
@@ -123,7 +162,7 @@ var CodeViewEngine = function CodeViewEngine(scope) {
     var t = scope.require('localization') || function(s) {return s;};
     var body = dust.helpers.tap(bodies.block, chunk, context);
     var localizedBody = t(body);
-    var reTokenized = localizedBody.replace(/\[([^\]]+)\]/g, '{$1}');
+    var reTokenized = localizedBody.replace(/\[([^\]]+)]/g, '{$1}');
     dust.loadSource(dust.compile(reTokenized, reTokenized));
     return chunk.map(function renderLocalizedString(chunk) {
       dust.render(reTokenized, context, function(err, rendered) {

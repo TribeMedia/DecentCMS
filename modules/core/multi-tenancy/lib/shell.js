@@ -26,7 +26,9 @@ var NullServices = require('./null-services');
  * @param {String}  [options.rootPath]         The path to the site's folder.
  * @param {String}  [options.settingsPath]     The path to the settings file for this tenant.
  * @param {String}  [options.host]             The host name under which the tenant answers.
+ * @param {String}  [options.debugHost]        A host name under which the tenant answers, that causes `request.debug` to be true.
  * @param {Number}  [options.port]             The port to which the tenant answers.
+ * @param {Boolean} [options.https]            True if the site must use HTTPS.
  * @param {String}  [options.cert]             The path to the SSL certificate to use with this tenant.
  * @param {String}  [options.key]              The path to the SSL key to use with this tenant.
  * @param {String}  [options.pfx]              The path to the pfx SSL certificate to use with this tenant.
@@ -40,7 +42,12 @@ function Shell(options) {
   this.name = options.name;
   this.rootPath = options.rootPath;
   this.settingsPath = options.settingsPath;
-  this.host = options.host || 'localhost';
+  this.host = Array.isArray(options.host)
+    ? options.host
+    : (options.host ? [options.host] : []);
+  this.debugHost = Array.isArray(options.debugHost)
+    ? options.debugHost
+    : (options.debugHost ? [options.debugHost] : ['localhost']);
   this.port = options.port || 80;
   this.https = !!options.https;
   this.cert = options.cert;
@@ -85,11 +92,12 @@ Shell.load = function(sitePath, defaults) {
   var settings = require(settingsPath);
   settings.settingsPath = settingsPath;
   settings.rootPath = sitePath;
-  for (var settingName in defaults) {
-    if (!(settingName in settings)) {
-      settings[settingName] = defaults[settingName];
-    }
-  }
+  Object.getOwnPropertyNames(defaults)
+    .forEach(function(settingName) {
+      if (!settings.hasOwnProperty(settingName)) {
+        settings[settingName] = defaults[settingName];
+      }
+    });
   return new Shell(settings);
 };
 
@@ -109,8 +117,7 @@ Shell.discover = function(defaults, rootPath) {
     if (siteName[0] === '.') return;
     var resolvedSitePath = path.resolve(rootPath, siteName);
     try {
-      var shell = Shell.load(resolvedSitePath, defaults);
-      Shell.list[siteName] = shell;
+      Shell.list[siteName] = Shell.load(resolvedSitePath, defaults);
     }
     catch(ex) {
       ex.path = resolvedSitePath;
@@ -131,8 +138,8 @@ Shell.resolve = function(request) {
   // If there's only one shell, always return that.
   if (shellNames.length === 1) return Shell.list[shellNames[0]];
   // Otherwise let each shell decide if it can handle the request.
-  for (var shellName in Shell.list) {
-    var shell = Shell.list[shellName];
+  for (var i = 0; i < shellNames.length; i++) {
+    var shell = Shell.list[shellNames[i]];
 
     if (shell.active && shell.canHandle(request)) {
       return shell;
@@ -147,12 +154,12 @@ Shell.resolve = function(request) {
  * @description
  * Determines if the shell can handle that request.
  *
- * @param {IncomingMessage} request The request
+ * @param request The request
  * @returns {Boolean} true if the shell can handle the request.
  */
 Shell.prototype.canHandle = function(request) {
   var host = request.headers.host;
-  var hosts = Array.isArray(this.host) ? this.host : [this.host];
+  var hosts = this.host.concat(this.debugHost);
   for (var i = 0; i < hosts.length; i++) {
     var thisHost = hosts[i];
     if ((
@@ -165,7 +172,16 @@ Shell.prototype.canHandle = function(request) {
     ) && (
     !this.path
     || request.url.substr(0, this.path.length) === this.path
-    )) return true;
+    )) {
+      if (i >= this.host.length) {
+        request.debug = true;
+      }
+      // We also set the shell into debug mode, which could cause problems
+      // if the same shell is on a server configured and able to answer on both
+      // the host and debug host. That should however never happen.
+      this.debug = request.debug;
+      return true;
+    }
   }
   return false;
 };
@@ -188,31 +204,56 @@ Shell.prototype.disable = function() {
   this.active = false;
 };
 
+function moduleSortOrder(moduleName, availableModules) {
+  var moduleManifest = availableModules[moduleName];
+  if (moduleManifest.hasOwnProperty('priority')) return -moduleManifest.priority;
+  if (moduleManifest.theme) return 1;
+  return -9999;
+}
+
 /**
  * @description
- * Scopes the shell, then loads all enabled services in each module.
+ * Scopes the shell, then loads all enabled services in each module,
+ * including modules and themes that are specific to this tenant.
  */
 Shell.prototype.load = function() {
-  if (this.loaded || !this.availableModules) return;
+  var self = this;
+  if (self.loaded || !self.availableModules) return;
   // Make this a scope
-  scope('shell', this);
-  // Load services from each available module
-  for (var moduleName in this.availableModules) {
-    this.loadModule(moduleName);
-  }
-  this.initialize();
-  // The shell exposes itself as a service
-  this.register('shell', this);
-  // Register null services if no better one exists
-  for (var nullServiceName in NullServices) {
-    if (!this.services.hasOwnProperty(nullServiceName)) {
-      var nullService = NullServices[nullServiceName];
-      nullService.isStatic = true;
-      this.services[nullServiceName] = [nullService];
+  scope('shell', self);
+  // Load services from each available module, in priority order, with themes last.
+  Object.getOwnPropertyNames(self.availableModules)
+    .sort(function(moduleName1, moduleName2) {
+      return moduleSortOrder(moduleName1, self.availableModules)
+        - moduleSortOrder(moduleName2, self.availableModules);
+    })
+    .forEach(function(moduleName) {
+      self.loadModule(moduleName);
+    });
+  // Load shell theme if it exists
+  if (self.rootPath) {
+    var themePath = path.join(self.rootPath, 'theme');
+    if (fs.existsSync(themePath)) {
+      var discoverModule = require('./module-discovery').discoverModule;
+      var theme = discoverModule(themePath, self.availableModules);
+      if (theme) self.loadModule(theme.name);
     }
   }
+  // Initialize shell and all services
+  self.initialize();
+  // The shell exposes itself as a service
+  self.register('shell', this);
+  // Register null services if no better one exists
+  Object.getOwnPropertyNames(NullServices)
+    .forEach(function(nullServiceName) {
+      if (!self.services.hasOwnProperty(nullServiceName)) {
+        var nullService = NullServices[nullServiceName];
+        nullService.isStatic = true;
+        self.services[nullServiceName] = [nullService];
+      }
+    });
   // Mark the shell as loaded
-  this.loaded = true;
+  self.loaded = true;
 };
 
 /**
@@ -231,41 +272,44 @@ Shell.prototype.loadModule = function(moduleName) {
   self.moduleManifests[moduleName] = manifest;
   var features = self.features;
   var services = manifest.services;
-  var anyEnabledService;
+  var anyEnabledService = false;
   var moduleServiceClasses = {};
-  for (var serviceName in services) {
-    var serviceList = services[serviceName];
-    if (!Array.isArray(serviceList)) {
-      serviceList = [serviceList];
-    }
-    for (var i = 0; i < serviceList.length ; i++) {
-      var service = serviceList[i];
-      var serviceFeature = service.feature;
-      // Skip if that service is not enabled
-      if (serviceFeature && !features.hasOwnProperty(serviceFeature)) continue;
-      var servicePath = path.resolve(manifest.physicalPath, service.path + ".js");
-      // Skip if that service is already loaded
-      if (self.serviceManifests[servicePath]) continue;
-      // Dependencies must be loaded first
-      var dependencies = service.dependencies;
-      if (dependencies) {
-        dependencies.forEach(function (dependencyPath) {
-          self.loadModule(dependencyPath);
-        });
-      }
-      // Services are obtained through require
-      var ServiceClass = moduleServiceClasses[serviceName] = require(servicePath);
-      self.register(serviceName, ServiceClass);
-      // Add the service's configuration onto the config object
-      self.settings[serviceFeature] = features[serviceFeature];
-      // Store the manifest on the service class, for reflection, and easy reading of settings
-      ServiceClass.manifest = service;
-      self.serviceManifests[servicePath] = service;
-      anyEnabledService = true;
-    }
+  if (services) {
+    Object.getOwnPropertyNames(services)
+      .forEach(function (serviceName) {
+        var serviceList = services[serviceName];
+        if (!Array.isArray(serviceList)) {
+          serviceList = [serviceList];
+        }
+        for (var i = 0; i < serviceList.length; i++) {
+          var service = serviceList[i];
+          var serviceFeature = service.feature;
+          // Skip if that service is not enabled
+          if (serviceFeature && !features.hasOwnProperty(serviceFeature)) continue;
+          var servicePath = path.resolve(manifest.physicalPath, service.path);
+          // Skip if that service is already loaded
+          if (self.serviceManifests[servicePath]) continue;
+          // Dependencies must be loaded first
+          var dependencies = service.dependencies;
+          if (dependencies) {
+            dependencies.forEach(function (dependencyPath) {
+              self.loadModule(dependencyPath);
+            });
+          }
+          // Services are obtained through require
+          var ServiceClass = moduleServiceClasses[serviceName] = require(servicePath);
+          self.register(serviceName, ServiceClass);
+          // Add the service's configuration onto the config object
+          self.settings[serviceFeature] = features[serviceFeature];
+          // Store the manifest on the service class, for reflection, and easy reading of settings
+          ServiceClass.manifest = service;
+          self.serviceManifests[servicePath] = service;
+          anyEnabledService = true;
+        }
+      });
   }
   // Only add to the modules collection if it has enabled services
-  if (anyEnabledService || manifest.theme) {
+  if (anyEnabledService || (manifest.theme && features.hasOwnProperty(moduleName))) {
     self.modules.push(moduleName);
   }
 };
@@ -275,7 +319,8 @@ Shell.prototype.loadModule = function(moduleName) {
  * Middleware for use, for example, with Express.
  *
  * @param {http.IncomingMessage} request Request
- * @param {http.ServerResponse}  response Response
+ * @param {http.ServerResponse} response Response
+ * @param {Function} next The callback.
  */
 Shell.prototype.middleware = function(request, response, next) {
   if (!this.canHandle(request)) {
@@ -296,8 +341,9 @@ Shell.prototype.middleware = function(request, response, next) {
  * * decent.core.shell.render-error
  * * decent.core.shell.end-request
  *
- * @param {http.IncomingMessage} request Request
- * @param {http.ServerResponse}  response Response
+ * @param request Request
+ * @param response Response
+ * @param {Function} next The callback
  */
 Shell.prototype.handleRequest = function(request, response, next) {
   var self = this;
@@ -312,7 +358,7 @@ Shell.prototype.handleRequest = function(request, response, next) {
     response: response
   };
   // Mix-in scope into request
-  scope('request', request, self.services, self);
+  self.makeSubScope('request', request);
   // Let services register themselves with the request
   self.emit(Shell.startRequestEvent, context);
 

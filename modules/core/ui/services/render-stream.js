@@ -8,8 +8,14 @@ var util = require('util');
 /**
  * @description
  * A transform stream for rendering shapes.
- * @param scope
  * @constructor
+ * @param {object} scope The scope
+ * @param {object} options The options
+ * @param {Array} [options.scripts] The list of scripts
+ * @param {Array} [options.stylesheets] The list of stylesheets
+ * @param {object} [options.meta] The meta tags
+ * @param {string} [options.title] The title
+ * @param {Array} [options.tags] The stack of tags currently open
  */
 function RenderStream(scope, options) {
   var flasync = require('flasync');
@@ -67,14 +73,21 @@ function RenderStream(scope, options) {
    * Writes the string, followed by \r\n.
    * @param {string} [text] The string to write.
    */
-  this.writeLine = this.asyncify(this._writeLine =
-    function writeLine(text) {
-      if (text) {
-        this.push(text);
+  this.writeLine = this.asyncify(this._writeLine = (
+    scope.debug
+      ? function writeLine(text) {
+        if (text) {
+          this.push(text);
+        }
+        this.push('\r\n');
+        return this;
       }
-      this.push('\r\n');
-      return this;
-    }
+      : function writeLine(text) {
+        if (text) {
+          this.push(text);
+        }
+        return this;
+      })
   );
 
   /**
@@ -83,11 +96,18 @@ function RenderStream(scope, options) {
    * @param {string} [text] The string to write.
    */
   this.writeEncodedLine = this.asyncify(this._writeEncodedLine =
-    function writeEncodedLine(text) {
+    scope.debug
+      ? function writeLine(text) {
+        if (text) {
+          this.push(html.htmlEncode(text));
+        }
+        this.push('\r\n');
+        return this;
+      }
+      : function writeLine(text) {
       if (text) {
         this.push(html.htmlEncode(text));
       }
-      this.push('\r\n');
       return this;
     }
   );
@@ -97,10 +117,15 @@ function RenderStream(scope, options) {
    * Renders a &lt;br/&gt; tag.
    */
   this.br = this.asyncify(this._br =
-    function br() {
-      this.push('<br/>\r\n');
-      return this;
-    }
+    scope.debug
+      ? function br() {
+        this.push('<br/>\r\n');
+        return this;
+      }
+      : function br() {
+        this.push('<br/>');
+        return this;
+      }
   );
 
   /**
@@ -188,34 +213,29 @@ function RenderStream(scope, options) {
   /**
    * @description
    * Triggers the rendering of the provided shape.
-   * @param {object} [shape]      The shape to render.
-   * @param {string} [tag]        An optional tag name to enclose the shape in if it exists.
-   * @param {object} [attributes] An optional list of attributes to add to the enclosing tag.
+   * @param {object} [options] The options object.
+   * @param {object} [options.shape] The shape to render.
+   * @param {string} [options.tag] An optional tag name to enclose the shape in if it exists.
+   * @param {object} [options.attributes] An optional list of attributes to add to the enclosing tag.
+   * @param {string} [options.shapeName] An optional name for the shape that overrides `shape.meta.type`.
    */
   this.shape = this.async(this._shape =
-    function renderShape(shape, tag, attributes, done) {
-      if (typeof(shape) === 'function') {
-        done = shape;
-        shape = null;
+    function renderShape(options, done) {
+      if (typeof(options) === 'function') {
+        done = options;
+        options = {};
       }
-      if (typeof(tag) === 'function') {
-        done = tag;
-        tag = null;
-      } else {
-        if (typeof(attributes) === 'function') {
-          if (shape && tag) this._startTag(tag);
-          done = attributes;
-          attributes = null;
-        }
-        else {
-          if (shape && tag) this._startTag(tag, attributes);
-        }
-      }
+      var shape = options.shape || null;
+      var tag = options.tag || null;
+      var attributes = options.attributes || null;
+      var shapeName = options.shapeName || null;
+      if (shape && tag) this._startTag(tag, attributes);
       if (!shape) {
         done();
         return this;
       }
       var innerRenderStream = new RenderStream(scope, options);
+      innerRenderStream.title = self.title;
       innerRenderStream
         .on('data', function(data) {
           self.push(data);
@@ -226,6 +246,7 @@ function RenderStream(scope, options) {
         });
       this.scope.callService('rendering-strategy', 'render', {
         shape: shape,
+        shapeName: shapeName,
         renderStream: innerRenderStream
       }, function(err) {
         if (err) {
@@ -263,11 +284,17 @@ function RenderStream(scope, options) {
    * @param {string} name The name of a local style sheet file.
    */
   this.addStyleSheet = this.asyncify(this._addStyleSheet =
-    function addStyleSheet(name) {
-      var url = '/css/' + name + '.css';
-      this._addExternalStyleSheet(url);
-      return this;
-    }
+    scope.debug
+      ? function addStyleSheet(name) {
+        var url = '/css/' + name + '.css';
+        this._addExternalStyleSheet(url);
+        return this;
+      }
+      : function addStyleSheet(name) {
+        var url = '/css/' + name + '.min.css';
+        this._addExternalStyleSheet(url);
+        return this;
+      }
   );
 
   /**
@@ -290,18 +317,28 @@ function RenderStream(scope, options) {
    * addStyleSheet and addExternalStyleSheet.
    */
   this.renderStyleSheets = this.asyncify(this._renderStyleSheets =
-    function renderStyleSheets() {
-      for (var i = 0; i < this.stylesheets.length; i++) {
-        this.push('  ');
-        this._tag('link', {
-          href: this.stylesheets[i],
-          rel: 'stylesheet',
-          type: 'text/css'
-        });
-        this.push('\r\n');
+    scope.debug
+      ? function renderStyleSheets() {
+        for (var i = 0; i < this.stylesheets.length; i++) {
+          this._tag('link', {
+            href: this.stylesheets[i],
+            rel: 'stylesheet',
+            type: 'text/css'
+          });
+          this.push('\r\n');
+        }
+        return this;
       }
-      return this;
-    }
+      : function renderStyleSheets() {
+        for (var i = 0; i < this.stylesheets.length; i++) {
+          this._tag('link', {
+            href: this.stylesheets[i],
+            rel: 'stylesheet',
+            type: 'text/css'
+          });
+        }
+        return this;
+      }
   );
 
   /**
@@ -312,11 +349,17 @@ function RenderStream(scope, options) {
    * @param {string} name The name of a local script file.
    */
   this.addScript = this.asyncify(this._addScript =
-    function addScript(name) {
-      var url = '/js/' + name + '.js';
-      this._addExternalScript(url);
-      return this;
-    }
+    scope.debug
+      ? function addScript(name) {
+        var url = '/js/' + name + '.js';
+        this._addExternalScript(url);
+        return this;
+      }
+      : function addScript(name) {
+        var url = '/js/' + name + '.min.js';
+        this._addExternalScript(url);
+        return this;
+      }
   );
 
   /**
@@ -339,17 +382,26 @@ function RenderStream(scope, options) {
    * addScript and addExternalScript.
    */
   this.renderScripts = this.asyncify(this._renderScripts =
-    function renderScripts() {
-      for (var i = 0; i < this.scripts.length; i++) {
-        this.push('  ');
-        this._tag('script', {
-          src: this.scripts[i],
-          type: 'text/javascript'
-        }, '');
-        this.push('\r\n');
+    scope.debug
+      ? function renderScripts() {
+        for (var i = 0; i < this.scripts.length; i++) {
+          this._tag('script', {
+            src: this.scripts[i],
+            type: 'text/javascript'
+          }, '');
+          this.push('\r\n');
+        }
+        return this;
       }
-      return this;
-    }
+      : function renderScripts() {
+        for (var i = 0; i < this.scripts.length; i++) {
+          this._tag('script', {
+            src: this.scripts[i],
+            type: 'text/javascript'
+          }, '');
+        }
+        return this;
+      }
   );
 
   /**
@@ -384,20 +436,30 @@ function RenderStream(scope, options) {
    * Renders the meta tag that have been registered so far using addMeta.
    */
   this.renderMeta = this.asyncify(this._renderMeta =
-    function renderMeta() {
-      for (var name in this.meta) {
-        var meta = this.meta[name];
-        var attributes = meta.attributes || {};
-        if (meta.name) attributes.name = meta.name;
-        if (meta.value) attributes.content = meta.value;
-        this.push('  ');
-        this.tag('meta', attributes);
-        this.push('\r\n');
+    scope.debug
+      ? function renderMeta() {
+        for (var name in this.meta) {
+          var meta = this.meta[name];
+          var attributes = meta.attributes || {};
+          if (meta.name) attributes.name = meta.name;
+          if (meta.value) attributes.content = meta.value;
+          this.tag('meta', attributes);
+          this.push('\r\n');
+        }
+        return this;
       }
-      return this;
-    }
+      : function renderMeta() {
+        for (var name in this.meta) {
+          var meta = this.meta[name];
+          var attributes = meta.attributes || {};
+          if (meta.name) attributes.name = meta.name;
+          if (meta.value) attributes.content = meta.value;
+          this.tag('meta', attributes);
+        }
+        return this;
+      }
   );
-};
+}
 
 var stream = require('stream');
 var Transform = stream.Transform;

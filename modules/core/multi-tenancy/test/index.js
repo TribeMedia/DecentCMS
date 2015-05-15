@@ -37,7 +37,7 @@ describe('Shell', function() {
     it('has default host, port, https flag, features, available modules, services, and manifests', function() {
       var shell = new Shell();
 
-      expect(shell.host).to.equal('localhost');
+      expect(shell.debugHost).to.deep.equal(['localhost']);
       expect(shell.port).to.equal(80);
       expect(shell.https).to.be.false;
       expect(shell.features)
@@ -86,7 +86,7 @@ describe('Shell', function() {
       });
 
       expect(shell.name).to.equal('Site 1');
-      expect(shell.host).to.equal('Default Host');
+      expect(shell.host).to.deep.equal(['Default Host']);
     });
 
     it('can be discovered from the /sites folder', function() {
@@ -130,6 +130,8 @@ describe('Shell', function() {
       var resolvedShell = Shell.resolve(req);
 
       expect(resolvedShell.name).to.equal('Site 1');
+      expect(req.debug).to.not.be.ok;
+      expect(resolvedShell.debug).to.not.be.ok;
     });
 
     it('is resolved by a host match on port 443 if flagged https', function() {
@@ -147,6 +149,8 @@ describe('Shell', function() {
       var resolvedShell = Shell.resolve(req);
 
       expect(resolvedShell.name).to.equal('Site 1');
+      expect(req.debug).to.not.be.ok;
+      expect(resolvedShell.debug).to.not.be.ok;
     });
 
     it('is resolved by a host and port match', function() {
@@ -163,6 +167,8 @@ describe('Shell', function() {
       var resolvedShell = Shell.resolve(req);
 
       expect(resolvedShell.name).to.equal('Site 1');
+      expect(req.debug).to.not.be.ok;
+      expect(resolvedShell.debug).to.not.be.ok;
     });
 
     it('is resolved by a host array and port match', function() {
@@ -184,6 +190,8 @@ describe('Shell', function() {
       var resolvedShell = Shell.resolve(req);
 
       expect(resolvedShell.name).to.equal('Site 1');
+      expect(req.debug).to.not.be.ok;
+      expect(resolvedShell.debug).to.not.be.ok;
     });
 
     it('is resolved by a host, port, and path match', function() {
@@ -202,6 +210,27 @@ describe('Shell', function() {
       var resolvedShell = Shell.resolve(req);
 
       expect(resolvedShell.name).to.equal('Site 1');
+      expect(req.debug).to.not.be.ok;
+      expect(resolvedShell.debug).to.not.be.ok;
+    });
+
+    it('activates debug mode on debug host', function() {
+      Shell.list = {
+        default: new Shell({name: 'Default shell'}),
+        site1: new Shell({
+          name: 'Site 1',
+          port: 80,
+          host: 'production',
+          debugHost: 'debug'
+        })
+      };
+      var req = new IncomingMessage();
+      req.headers.host = 'debug';
+      var resolvedShell = Shell.resolve(req);
+
+      expect(resolvedShell.name).to.equal('Site 1');
+      expect(req.debug).to.be.ok;
+      expect(resolvedShell.debug).to.be.ok;
     });
 
     it('resolves to null if other shells are disabled', function() {
@@ -361,7 +390,7 @@ describe('Shell', function() {
     it('can load a service from a module', function() {
       var ServiceClass1 = serviceClassFactory(1);
       var stubs = {};
-      var resolvedPathToService = path.resolve('path/to/module1/lib/service1.js');
+      var resolvedPathToService = path.resolve('path/to/module1/lib/service1');
       stubs[resolvedPathToService] = ServiceClass1;
       var PhoniedShell = proxyquire('../lib/shell', stubs);
       var shell = new PhoniedShell({
@@ -397,16 +426,35 @@ describe('Shell', function() {
 
     it('loads services when there are multiple shells', function() {
       var ServiceClass1 = serviceClassFactory(1);
-      var initialized = false;
-      ServiceClass1.init = function(shell) {
-        initialized = true;
+      var initialized1 = false;
+      ServiceClass1.init = function() {
+        initialized1 = true;
       };
-      var stubs = {};
-      var resolvedPathToService = path.resolve('path/to/module1/lib/service1.js');
+      var ServiceClass2 = serviceClassFactory(2);
+      var initialized2 = false;
+      ServiceClass2.init = function() {
+        initialized2 = true;
+      };
+      var stubs = {
+        fs: {
+          existsSync: function() {return true;},
+          readdirSync: function() {return ['service2.js'];}
+        }
+      };
+      var resolvedPathToService = path.resolve('path/to/module1/lib/service1');
       stubs[resolvedPathToService] = ServiceClass1;
+      var resolvedPathToShellThemeService = path.resolve('path/to/shell/theme/services/service2');
+      stubs[resolvedPathToShellThemeService] = ServiceClass2;
+      var resolvedThemeManifest = path.resolve('path/to/shell/theme/package.json');
+      stubs[resolvedThemeManifest] = {
+        name: 'site-theme',
+        '@noCallThru': true
+      };
+      var phoniedModuleDiscovery = proxyquire('../lib/module-discovery', stubs);
+      stubs['./module-discovery'] = phoniedModuleDiscovery;
       var PhoniedShell = proxyquire('../lib/shell', stubs);
       var shellSettings = {
-        features: {'feature 1': {}},
+        features: {'feature 1': {}, 'service2': {}},
         availableModules: {
           'module 1': {
             name: 'module 1',
@@ -418,7 +466,8 @@ describe('Shell', function() {
               }
             }
           }
-        }
+        },
+        rootPath: path.resolve('path/to/shell')
       };
       var shell1 = new PhoniedShell(shellSettings);
       var shell2 = new PhoniedShell(shellSettings);
@@ -429,12 +478,16 @@ describe('Shell', function() {
         .to.have.property('service1');
       expect(shell2.services)
         .to.have.property('service1');
+      expect(shell1.services)
+        .to.have.property('service2');
+      expect(shell2.services)
+        .to.have.property('service2');
     });
 
     it('will give a different instance of a service every time', function() {
       var ServiceClass1 = serviceClassFactory(1);
       var stubs = {};
-      var resolvedPathToService = path.resolve('path/to/module1/lib/service1.js');
+      var resolvedPathToService = path.resolve('path/to/module1/lib/service1');
       stubs[resolvedPathToService] = ServiceClass1;
       var PhoniedShell = proxyquire('../lib/shell', stubs);
       var shell = new PhoniedShell({
@@ -490,12 +543,12 @@ describe('Shell', function() {
     });
 
     it('will load multiple services with the same name', function() {
-      var stubs = {};
-      var resolvedPathToService1 = path.resolve('path/to/module1/lib/service1.js');
+       var stubs = {};
+      var resolvedPathToService1 = path.resolve('path/to/module1/lib/service1');
       stubs[resolvedPathToService1] = serviceClassFactory(1);
-      var resolvedPathToService2 = path.resolve('path/to/module2/lib/service2.js');
+      var resolvedPathToService2 = path.resolve('path/to/module2/lib/service2');
       stubs[resolvedPathToService2] = serviceClassFactory(2);
-      var resolvedPathToService3 = path.resolve('path/to/module2/lib/service3.js');
+      var resolvedPathToService3 = path.resolve('path/to/module2/lib/service3');
       stubs[resolvedPathToService3] = serviceClassFactory(3);
 
       var PhoniedShell = proxyquire('../lib/shell', stubs);
@@ -544,11 +597,11 @@ describe('Shell', function() {
 
     it('will load services and modules in dependency order', function() {
       var stubs = {};
-      var resolvedPathToService1 = path.resolve('path/to/module1/lib/service1.js');
+      var resolvedPathToService1 = path.resolve('path/to/module1/lib/service1');
       stubs[resolvedPathToService1] = serviceClassFactory(1);
-      var resolvedPathToService2 = path.resolve('path/to/module2/lib/service2.js');
+      var resolvedPathToService2 = path.resolve('path/to/module2/lib/service2');
       stubs[resolvedPathToService2] = serviceClassFactory(2);
-      var resolvedPathToService3 = path.resolve('path/to/module3/lib/service3.js');
+      var resolvedPathToService3 = path.resolve('path/to/module3/lib/service3');
       stubs[resolvedPathToService3] = serviceClassFactory(3);
 
       var PhoniedShell = proxyquire('../lib/shell', stubs);
@@ -611,6 +664,88 @@ describe('Shell', function() {
         .to.deep.equal(["module 2", "module 3", "module 1"]);
     });
 
+    it('will load services and modules in priority order, with themes last', function() {
+      var stubs = {};
+      var resolvedPathToService1 = path.resolve('path/to/module1/lib/service1');
+      stubs[resolvedPathToService1] = serviceClassFactory(1);
+      var resolvedPathToService2 = path.resolve('path/to/module2/lib/service2');
+      stubs[resolvedPathToService2] = serviceClassFactory(2);
+      var resolvedPathToService3 = path.resolve('path/to/module3/lib/service3');
+      stubs[resolvedPathToService3] = serviceClassFactory(3);
+
+      var PhoniedShell = proxyquire('../lib/shell', stubs);
+      var shell = new PhoniedShell({
+        features: {
+          'feature 1': {},
+          'theme 1': {},
+          'theme 2': {}
+        },
+        availableModules: {
+          'theme 1': {
+            name: 'theme 1',
+            theme: true,
+            priority: 1,
+            physicalPath: 'path/to/theme1'
+          },
+          'theme 2': {
+            name: 'theme 2',
+            theme: true,
+            physicalPath: 'path/to/theme2'
+          },
+          'module 1': {
+            name: 'module 1',
+            priority: 0,
+            physicalPath: 'path/to/module1',
+            services: {
+              service1: {
+                feature: 'feature 1',
+                path: 'lib/service1'
+              }
+            }
+          },
+          'module 2': {
+            name: 'module 2',
+            priority: 3,
+            physicalPath: 'path/to/module2',
+            services: {
+              service1: {
+                feature: 'feature 1',
+                path: 'lib/service2'
+              }
+            }
+          },
+          'module 3': {
+            name: 'module 3',
+            priority: 2,
+            physicalPath: 'path/to/module3',
+            services: {
+              service1: {
+                feature: 'feature 1',
+                path: 'lib/service3'
+              }
+            }
+          }
+        }
+      });
+      shell.load();
+
+      var service1s = shell.getServices('service1')
+      expect(service1s)
+        .to.have.length(3);
+
+      expect(service1s[0])
+        .to.have.a.property('what', 'instance of service 2');
+      expect(service1s[1])
+        .to.have.a.property('what', 'instance of service 3');
+      expect(service1s[2])
+        .to.have.a.property('what', 'instance of service 1');
+      // Require gets the least dependant
+      expect(shell.require('service1'))
+        .to.have.a.property('what', 'instance of service 1');
+      expect(shell.modules)
+        .to.deep.equal(["module 2", "module 3", "theme 1", "module 1", "theme 2"]);
+    });
+
     it('will use null localization if no localization service is defined', function() {
       var shell = new Shell();
       shell.load();
@@ -643,7 +778,7 @@ describe('Shell', function() {
         initialized = true;
       };
       var stubs = {};
-      var resolvedPathToService = path.resolve('path/to/module1/lib/service1.js');
+      var resolvedPathToService = path.resolve('path/to/module1/lib/service1');
       stubs[resolvedPathToService] = ServiceClass1;
       var PhoniedShell = proxyquire('../lib/shell', stubs);
       var shell = new PhoniedShell({
@@ -678,7 +813,7 @@ describe('Shell', function() {
       };
       ServiceClass['@noCallThru'] = true;
       var stubs = {};
-      var resolvedPathToService = path.resolve('path/to/module/lib/service.js');
+      var resolvedPathToService = path.resolve('path/to/module/lib/service');
       stubs[resolvedPathToService] = ServiceClass;
       var PhoniedShell = proxyquire('../lib/shell', stubs);
       var shell = new PhoniedShell({
@@ -710,7 +845,7 @@ describe('Shell', function() {
     it('will store feature settings from the site settings on the shell', function() {
       var ServiceClass1 = serviceClassFactory(1);
       var stubs = {};
-      var resolvedPathToService = path.resolve('path/to/module1/lib/service1.js');
+      var resolvedPathToService = path.resolve('path/to/module1/lib/service1');
       stubs[resolvedPathToService] = ServiceClass1;
       var PhoniedShell = proxyquire('../lib/shell', stubs);
       var shell = new PhoniedShell({
